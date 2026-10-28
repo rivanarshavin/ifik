@@ -84,7 +84,7 @@ class DosenWali_model extends CI_Model {
         $namaDosen = !empty($user['name']) ? $user['name'] : ($this->session->userdata('name') ?: 'Dosen Wali');
         $kodeDosen = !empty($user['kode_dosen']) ? $user['kode_dosen'] : ($this->session->userdata('kode_dosen') ?: 'DWL');
         $nipDosen  = !empty($user['nip']) ? $user['nip'] : ($user['nidn_nim'] ?? ($nip ?: '-'));
-        $prodi     = !empty($user['prodi']) ? $user['prodi'] : ($this->session->userdata('selected_prodi') ?: '-');
+        $prodi     = !empty($user['prodi']) ? $user['prodi'] : '-';
 
         return array(
             'nip'        => $nipDosen,
@@ -95,18 +95,79 @@ class DosenWali_model extends CI_Model {
         );
     }
 
-    // Log ketika Dosen Wali membuka/meninjau file PDF
+    /**
+     * Log ketika Dosen Wali membuka/meninjau file PDF berkas persyaratan TA.
+     * Mengupdate status view_doswal di file_pendaftaran, kolom review_file_* di pendaftaran_ta,
+     * serta pendaftaran_berkas jika tersedia kolom status view.
+     *
+     * @param string $nim NIM mahasiswa
+     * @param string|array $file_type Tipe/kode berkas (ksm, transkrip, pernyataan, bebas_lab, dll)
+     * @return bool
+     */
     public function log_file_review($nim, $file_type) {
         if (empty($nim) || empty($file_type)) return false;
 
-        if ($this->db->table_exists('file_pendaftaran')) {
-            $target_ids = $this->resolve_target_mhs_ids($nim);
-            $this->db->group_start()
-                ->where_in('id_mhs', array_unique($target_ids))
-                ->or_like('id_mhs', $nim)
-            ->group_end()
-            ->where('nama', $file_type)
-            ->update('file_pendaftaran', ['view_doswal' => 1]);
+        $types = is_array($file_type) ? $file_type : [$file_type];
+        $target_ids = $this->resolve_target_mhs_ids($nim);
+        $u_id = !empty($target_ids) ? $target_ids[0] : $nim;
+
+        foreach ($types as $ft) {
+            $ft = trim($ft);
+            if (empty($ft) || $ft === 'judul_jenis') continue;
+
+            $clean_key = str_replace('file_', '', strtolower($ft));
+            $variants = array_unique([$ft, $clean_key, 'file_' . $clean_key]);
+
+            // 1. Update atau insert di tabel file_pendaftaran
+            if ($this->db->table_exists('file_pendaftaran')) {
+                $check = $this->db->group_start()
+                    ->where_in('id_mhs', array_unique($target_ids))
+                    ->or_like('id_mhs', $nim)
+                ->group_end()
+                ->group_start()
+                    ->where_in('nama', $variants)
+                    ->or_like('nama', $clean_key)
+                ->group_end()
+                ->get('file_pendaftaran')
+                ->row_array();
+
+                if ($check) {
+                    $this->db->where('id', $check['id'])->update('file_pendaftaran', ['view_doswal' => 1]);
+                } else {
+                    $this->db->insert('file_pendaftaran', [
+                        'id_mhs'        => $u_id ?: $nim,
+                        'nama'          => 'file_' . $clean_key,
+                        'file'          => $clean_key . '_' . $nim . '.pdf',
+                        'status_doswal' => 'Pending',
+                        'date'          => date('Y-m-d H:i:s'),
+                        'view_doswal'   => 1
+                    ]);
+                }
+            }
+
+            // 2. Update kolom review_file_* di tabel pendaftaran_ta
+            if ($this->db->table_exists('pendaftaran_ta')) {
+                $col = 'review_file_' . $clean_key;
+                if ($this->db->field_exists($col, 'pendaftaran_ta')) {
+                    $this->db->where('nim', $nim)->update('pendaftaran_ta', [$col => 1]);
+                }
+            }
+
+            // 3. Update di tabel pendaftaran_berkas jika ada kolom view_doswal / is_viewed
+            if ($this->db->table_exists('pendaftaran_berkas')) {
+                $pb_fields = $this->db->list_fields('pendaftaran_berkas');
+                $pb_up = [];
+                if (in_array('view_doswal', $pb_fields)) $pb_up['view_doswal'] = 1;
+                if (in_array('is_viewed', $pb_fields)) $pb_up['is_viewed'] = 1;
+                if (!empty($pb_up)) {
+                    $this->db->where('nim', $nim)
+                        ->group_start()
+                            ->where_in('kode_berkas', $variants)
+                            ->or_like('kode_berkas', $clean_key)
+                        ->group_end()
+                        ->update('pendaftaran_berkas', $pb_up);
+                }
+            }
         }
 
         return true;
@@ -1086,6 +1147,8 @@ class DosenWali_model extends CI_Model {
                 'catatan'           => $kom,
                 'view_doswal'       => !empty($fData['view_doswal']) ? 1 : 0
             ];
+            $cleanDocKey = str_replace('file_', '', $namaDoc);
+            $bMap[$cleanDocKey] = $bMap[$namaDoc];
         }
 
         // Ambil juga dari pendaftaran_berkas jika ada
@@ -1097,12 +1160,18 @@ class DosenWali_model extends CI_Model {
                 $cleanSt = ($st_ver === 'Valid' || $st_ver === 'Approved') ? 'Approved' : (($st_ver === 'Invalid' || $st_ver === 'Rejected') ? 'Rejected' : 'Pending');
                 $pbCat = $pbRow['catatan'] ?? '';
 
+                $cleanKb = str_replace('file_', '', $kb);
+                $pbView = !empty($pbRow['view_doswal']) ? 1 : (!empty($pbRow['is_viewed']) ? 1 : 0);
                 if (empty($bMap[$kb])) {
                     $bMap[$kb] = [
                         'file_name'         => $pbRow['file_name'],
                         'status_verifikasi' => ($cleanSt === 'Approved') ? 'Valid' : (($cleanSt === 'Rejected') ? 'Invalid' : 'Pending'),
-                        'catatan'           => $pbCat
+                        'catatan'           => $pbCat,
+                        'view_doswal'       => $pbView
                     ];
+                }
+                if (empty($bMap[$cleanKb])) {
+                    $bMap[$cleanKb] = $bMap[$kb];
                 }
 
                 if ($kb === 'ksm' && empty($file_ksm)) {
@@ -1178,10 +1247,28 @@ class DosenWali_model extends CI_Model {
         ];
 
         foreach ($bMap as $bk => $bv) {
-            $res['file_' . $bk] = $bv['file_name'];
-            $res['status_file_' . $bk] = ($bv['status_verifikasi'] === 'Valid') ? 'Approved' : (($bv['status_verifikasi'] === 'Invalid') ? 'Rejected' : 'Pending');
-            $res['catatan_file_' . $bk] = $bv['catatan'] ?? '';
+            $clean_bk = str_replace('file_', '', $bk);
+            $res['file_' . $clean_bk] = $bv['file_name'];
+            $res['status_file_' . $clean_bk] = ($bv['status_verifikasi'] === 'Valid') ? 'Approved' : (($bv['status_verifikasi'] === 'Invalid') ? 'Rejected': 'Pending');
+            $res['catatan_file_' . $clean_bk] = $bv['catatan'] ?? '';
+            $res['review_file_' . $clean_bk] = !empty($bv['view_doswal']) ? 1 : 0;
             $res['review_file_' . $bk] = !empty($bv['view_doswal']) ? 1 : 0;
+        }
+
+        // Sinkronisasi dengan review_file_* dari pendaftaran_ta jika ada
+        if (!empty($pt_row)) {
+            foreach (['ksm', 'transkrip', 'pernyataan', 'bebas_lab'] as $std_k) {
+                if (!empty($pt_row['review_file_' . $std_k])) {
+                    $res['review_file_' . $std_k] = 1;
+                    $res['review_file_file_' . $std_k] = 1;
+                    if (isset($res['berkas_map'][$std_k])) {
+                        $res['berkas_map'][$std_k]['view_doswal'] = 1;
+                    }
+                    if (isset($res['berkas_map']['file_' . $std_k])) {
+                        $res['berkas_map']['file_' . $std_k]['view_doswal'] = 1;
+                    }
+                }
+            }
         }
 
         return $res;

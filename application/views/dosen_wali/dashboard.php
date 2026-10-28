@@ -612,30 +612,13 @@
                 <p class="text-slate-600 text-xs mt-1 font-normal">Kelola persetujuan pendaftaran Tugas Akhir mahasiswa bimbingan Anda secara praktis.</p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-                <form action="<?= site_url('dosen/wali/pilih_prodi'); ?>" method="POST" class="inline-flex items-center m-0">
-                    <div class="flex items-center gap-2 px-3 py-1.5 bg-white/95 rounded-xl border border-orange-200/90 shadow-xs text-xs">
-                        <span class="px-2 py-0.5 bg-orange-100/90 text-orange-700 rounded-md border border-orange-200/80 font-bold text-[11px] tracking-wide"><?= htmlspecialchars($dosen_info['kode_dosen'] ?: 'DOSEN'); ?></span>
-                        <div class="flex items-center gap-1.5 text-slate-600 font-semibold">
-                            <span>Prodi:</span>
-                            <div class="relative inline-flex items-center">
-                                <?php 
-                                    $this->load->helper('fik_prodi');
-                                    $currentProdi = $dosen_info['prodi'] ?? ($dosen_info['kejuruan'] ?? 'S1 Desain Komunikasi Visual (DKV)');
-                                    $prodiOptions = function_exists('fik_program_studi') ? fik_program_studi() : ['S1 Desain Komunikasi Visual (DKV)', 'S1 Informatika'];
-                                ?>
-                                <select name="prodi" onchange="this.form.submit()" 
-                                        class="appearance-none font-bold text-slate-800 bg-orange-50/70 hover:bg-orange-100/80 pl-2 pr-6 py-1 rounded-lg border border-orange-200/70 cursor-pointer text-xs outline-none transition-all hover:border-orange-400">
-                                    <?php foreach ($prodiOptions as $po): 
-                                        $isSelected = (strcasecmp($currentProdi, $po) === 0 || stripos($po, $currentProdi) !== false || stripos($currentProdi, $po) !== false);
-                                    ?>
-                                        <option value="<?= $po; ?>" <?= $isSelected ? 'selected' : ''; ?>><?= $po; ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <i class="bi bi-chevron-down absolute right-2 text-[9px] text-orange-600 pointer-events-none"></i>
-                            </div>
-                        </div>
+                <div class="flex items-center gap-2.5 px-3.5 py-2 bg-white/95 rounded-xl border border-orange-200/90 shadow-xs text-xs">
+                    <span class="px-2 py-0.5 bg-orange-100/90 text-orange-700 rounded-md border border-orange-200/80 font-bold text-[11px] tracking-wide"><?= htmlspecialchars($dosen_info['kode_dosen'] ?: 'DOSEN'); ?></span>
+                    <div class="flex items-center gap-1.5 text-slate-600 font-semibold">
+                        <span>Prodi:</span>
+                        <span class="font-bold text-slate-800"><?= htmlspecialchars($dosen_info['prodi'] ?? ($dosen_info['kejuruan'] ?? '-')); ?></span>
                     </div>
-                </form>
+                </div>
                 <div class="px-4 py-2 bg-white/90 rounded-xl border border-orange-200 shadow-xs text-xs font-semibold text-slate-700 flex items-center gap-2 w-fit">
                     <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Sistem Persetujuan Aktif</span>
@@ -3719,6 +3702,9 @@
     function setupAndShowQuickDocReview(nim, docKey) {
         window.currentReviewNim = nim;
         window.currentReviewDocKey = docKey || 'ksm';
+        if (window.currentReviewDocKey && window.currentReviewDocKey !== 'judul_jenis') {
+            logDocReviewDW(nim, window.currentReviewDocKey);
+        }
         renderQuickDocReviewModal();
     }
 
@@ -4311,6 +4297,20 @@
                     statusBadge = '<span class="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200">Menunggu</span>';
                 }
 
+                const cleanDocKey = String(doc.key).replace(/^file_/, '');
+                const isReviewed = !isJudulDoc && (
+                    Boolean(mhs['review_file_' + cleanDocKey]) || 
+                    Boolean(mhs['review_file_' + doc.key]) || 
+                    Boolean(mhs.berkas_map && (mhs.berkas_map[cleanDocKey]?.view_doswal || mhs.berkas_map[doc.key]?.view_doswal)) || 
+                    (status === 'Approved' || status === 'Rejected')
+                );
+                const reviewViewBadgeHtml = isJudulDoc ? '' : `
+                    <span id="reviewViewBadge_${nim}_${cleanDocKey}" class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[8px] font-bold ${isReviewed ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-slate-100 text-slate-400 border border-slate-200'}" title="${isReviewed ? 'Berkas sudah pernah dibuka/dilihat oleh Dosen Wali' : 'Berkas belum pernah dibuka'}">
+                        <i class="fa-solid ${isReviewed ? 'fa-eye' : 'fa-eye-slash'} text-[8px]"></i>
+                        <span>${isReviewed ? 'Dilihat' : 'Belum'}</span>
+                    </span>
+                `;
+
                 const activeCardBorder = isCurrentlyPreviewed 
                     ? 'ring-2 ring-orange-500 border-orange-300 bg-orange-50/45' 
                     : 'border-slate-200 bg-white hover:border-slate-300';
@@ -4350,7 +4350,7 @@
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <i class="${doc.icon} text-orange-500 text-xs shrink-0"></i>
                                 <span class="font-bold text-slate-800 text-[11px] truncate">${doc.title}</span>
-                                <span id="cardDocBadge_${nim}_${doc.key}">${statusBadge}</span>
+                                <span id="cardDocBadge_${nim}_${doc.key}">${statusBadge}</span> ${reviewViewBadgeHtml}
                             </div>
                             <p class="text-[10px] font-mono text-slate-400 truncate mt-0.5" title="${isJudulDoc ? (mhs.judul || '') : rawFilename}">
                                 ${docSubtext}
@@ -4468,6 +4468,68 @@
         wrapper.innerHTML = headerSummaryBar + cardsHtml;
     }
 
+    /**
+     * Catat review/view berkas ke backend & perbarui status UI dosen wali
+     */
+    function logDocReviewDW(nim, docKey) {
+        if (!nim || !docKey) return;
+        nim = String(nim).trim();
+
+        let keys = Array.isArray(docKey) ? docKey : [docKey];
+        keys = keys.map(k => String(k).trim()).filter(k => k && k !== 'judul_jenis');
+        if (keys.length === 0) return;
+
+        // 1. Update in-memory mhsDataMap langsung agar reaktif
+        if (window.mhsDataMap && window.mhsDataMap[nim]) {
+            const mhs = window.mhsDataMap[nim];
+            if (!mhs.berkas_map) mhs.berkas_map = {};
+
+            keys.forEach(k => {
+                const cleanK = k.replace(/^file_/, '');
+                mhs['review_file_' + cleanK] = 1;
+                mhs['review_file_' + k] = 1;
+                mhs['review_file_file_' + cleanK] = 1;
+
+                if (mhs.berkas_map[cleanK]) {
+                    mhs.berkas_map[cleanK].view_doswal = 1;
+                }
+                if (mhs.berkas_map[k]) {
+                    mhs.berkas_map[k].view_doswal = 1;
+                }
+                if (mhs.berkas_map['file_' + cleanK]) {
+                    mhs.berkas_map['file_' + cleanK].view_doswal = 1;
+                }
+
+                // Update badge review status di DOM kartu mahasiswa jika ada
+                const badgeEl = document.getElementById(`reviewViewBadge_${nim}_${cleanK}`) || document.getElementById(`reviewViewBadge_${nim}_${k}`);
+                if (badgeEl) {
+                    badgeEl.className = 'inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[8px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 animate-fade-in';
+                    badgeEl.title = 'Berkas sudah pernah dibuka/dilihat oleh Dosen Wali';
+                    badgeEl.innerHTML = '<i class="fa-solid fa-eye text-[8px]"></i> <span>Dilihat</span>';
+                }
+            });
+        }
+
+        // 2. Kirim AJAX ke controller log_review_ajax
+        try {
+            const fd = new FormData();
+            fd.append('nim', nim);
+            fd.append('file_type', keys.join(','));
+
+            fetch('<?= site_url("dosen/wali/log_review_ajax"); ?>', {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: fd
+            }).then(r => r.json()).then(res => {
+                // Berhasil mencatat di DB
+            }).catch(e => {
+                console.warn('Gagal mencatat review berkas ke database:', e);
+            });
+        } catch (err) {
+            console.warn('Error logDocReviewDW:', err);
+        }
+    }
+
     function previewBerkasItem(nim, docKey) {
         const mhs = window.mhsDataMap ? window.mhsDataMap[nim] : null;
         if (!mhs) return;
@@ -4487,6 +4549,11 @@
             window.activePreviews.shift();
         }
         window.activePreviews.push({ nim, docKey });
+
+        // Log review ke database saat berkas dibuka
+        if (docKey !== 'judul_jenis') {
+            logDocReviewDW(nim, docKey);
+        }
 
         refreshLihatBerkasView();
 
@@ -4513,9 +4580,16 @@
         window.activePreviews = window.activePreviews.filter(p => String(p.nim).trim() !== nim);
 
         // Masukkan semua berkas mahasiswa ini ke activePreviews
+        const allKeys = [];
         docList.forEach(d => {
             window.activePreviews.push({ nim, docKey: d.key });
+            if (d.key !== 'judul_jenis') allKeys.push(d.key);
         });
+
+        // Log semua berkas sekaligus ke database
+        if (allKeys.length > 0) {
+            logDocReviewDW(nim, allKeys);
+        }
 
         refreshLihatBerkasView();
 
@@ -4576,6 +4650,9 @@
                 docKey = String(docKey).trim();
                 // Buka HANYA 1 preview ini (jangan bertumpuk banyak)
                 window.activePreviews = [{ nim, docKey }];
+                if (docKey !== 'judul_jenis') {
+                    logDocReviewDW(nim, docKey);
+                }
             }
             refreshLihatBerkasView();
             if (docKey) {
@@ -4705,6 +4782,9 @@
                     statusBadgeEl.innerHTML = getDocStatusBadgeHtml(currentStatus);
                 }
             } else {
+                if (p.docKey !== 'judul_jenis') {
+                    logDocReviewDW(p.nim, p.docKey);
+                }
                 const mhs = window.mhsDataMap[p.nim] || {};
                 const doc = docList.find(d => d.key === p.docKey) || { title: p.docKey, fileField: `file_${p.docKey}` };
                 const fileField = doc.fileField || `file_${p.docKey}`;
@@ -5633,6 +5713,7 @@
     window.resetDocApproval = resetDocApproval;
     window.executeDocReset = executeDocReset;
     window.openAllDocsForStudent = openAllDocsForStudent;
+    window.logDocReviewDW = logDocReviewDW;
 
     // Handle horizontal scroll & wheel di panel preview berkas
     const previewWrapperEl = document.getElementById('wrapperPreviewBerkas');

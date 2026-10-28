@@ -480,9 +480,9 @@ class DosenWali extends CI_Controller {
                 'berkas_map'             => $m['berkas_map'] ?? []
             ];
 
-            // Pasang status & file untuk setiap berkas dinamis
+            // Pasang status, file & status review untuk setiap berkas dinamis
             foreach ($m as $k => $v) {
-                if (strpos($k, 'file_') === 0 || strpos($k, 'status_file_') === 0 || strpos($k, 'catatan_file_') === 0) {
+                if (strpos($k, 'file_') === 0 || strpos($k, 'status_file_') === 0 || strpos($k, 'catatan_file_') === 0 || strpos($k, 'review_file_') === 0) {
                     $item[$k] = $v;
                 }
             }
@@ -568,6 +568,10 @@ class DosenWali extends CI_Controller {
                 'status_file_pernyataan'=> $r['status_file_pernyataan'] ?? 'Pending',
                 'file_bebas_lab'       => $r['file_bebas_lab'] ?? '',
                 'status_file_bebas_lab'=> $r['status_file_bebas_lab'] ?? 'Pending',
+                'review_file_ksm'        => !empty($r['review_file_ksm']) ? 1 : (!empty($r['berkas_map']['ksm']['view_doswal']) ? 1 : 0),
+                'review_file_transkrip'  => !empty($r['review_file_transkrip']) ? 1 : (!empty($r['berkas_map']['transkrip']['view_doswal']) ? 1 : 0),
+                'review_file_pernyataan' => !empty($r['review_file_pernyataan']) ? 1 : (!empty($r['berkas_map']['pernyataan']['view_doswal']) ? 1 : 0),
+                'review_file_bebas_lab'  => !empty($r['review_file_bebas_lab']) ? 1 : (!empty($r['berkas_map']['bebas_lab']['view_doswal']) ? 1 : 0),
                 'berkas_map'           => $r['berkas_map'] ?? [],
                 'files' => (function() use ($r, $resolve_pdf_url) {
                     $ci =& get_instance();
@@ -584,11 +588,14 @@ class DosenWali extends CI_Controller {
                     $fMap = array();
                     foreach ($active_syarat as $asb) {
                         $k = $asb['kode_berkas'];
+                        $clean_k = str_replace('file_', '', $k);
+                        $is_rev = !empty($r['review_file_' . $clean_k]) || !empty($r['review_file_' . $k]) || (!empty($r['berkas_map'][$clean_k]['view_doswal'])) || (!empty($r['berkas_map'][$k]['view_doswal'])) ? 1 : 0;
                         $fMap[$k] = array(
-                            'name'   => $r['file_' . $k] ?? ($k . '_' . $r['nim'] . '.pdf'),
-                            'url'    => $resolve_pdf_url($r['file_' . $k] ?? ''),
-                            'status' => $r['status_file_' . $k] ?? 'Pending',
-                            'note'   => (($r['status_file_' . $k] ?? '') === 'Rejected') ? htmlspecialchars($r['catatan_file_' . $k] ?? '') : ''
+                            'name'     => $r['file_' . $k] ?? ($k . '_' . $r['nim'] . '.pdf'),
+                            'url'      => $resolve_pdf_url($r['file_' . $k] ?? ''),
+                            'status'   => $r['status_file_' . $k] ?? 'Pending',
+                            'note'     => (($r['status_file_' . $k] ?? '') === 'Rejected') ? htmlspecialchars($r['catatan_file_' . $k] ?? '') : '',
+                            'reviewed' => $is_rev
                         );
                     }
                     return $fMap;
@@ -844,18 +851,11 @@ class DosenWali extends CI_Controller {
     }
 
     /**
-     * Ubah / Pilih Jurusan (Prodi) Dosen Wali Secara Dinamis
+     * Ubah / Pilih Jurusan (Prodi) Dosen Wali
+     * Dibatasi: Hak perubahan prodi hanya dapat dilakukan oleh Super Admin melalui Manajemen Akun.
      */
     public function pilih_prodi() {
-        $prodi = trim($this->input->post('prodi', true) ?? '');
-        if (!empty($prodi)) {
-            $this->session->set_userdata('selected_prodi', $prodi);
-            $userId = $this->session->userdata('user_id');
-            if ($userId && $this->db->table_exists('user')) {
-                $this->db->where('id', $userId)->update('user', ['prodi' => $prodi]);
-            }
-            $this->session->set_flashdata('success', "Jurusan berhasil diubah ke: <b>" . htmlspecialchars($prodi) . "</b>");
-        }
+        $this->session->set_flashdata('error', 'Perubahan program studi hanya dapat dilakukan oleh Super Admin melalui Manajemen Akun.');
         redirect('dosen/wali');
     }
 

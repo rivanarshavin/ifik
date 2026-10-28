@@ -778,7 +778,7 @@ class DosenTicketing_model extends CI_Model {
         }
 
         $r->created_at    = $createdAtReal ?: (!empty($row->tgl_ticketing) ? ($row->tgl_ticketing . ' 08:00:00') : date('Y-m-d H:i:s'));
-        $r->updated_at    = $tglTanggapan ?: $r->created_at;
+        $r->updated_at    = $r->tgl_tanggapan ?: $r->created_at;
 
         return $r;
     }
